@@ -2,18 +2,8 @@ import re
 import requests
 from bs4 import BeautifulSoup
 from prisoner_class import Prisoner
-from FSIN import FSIN_json
 import mongo_file
-
-regions = []
-for region in FSIN_json:
-    regions.append(region['name'])
-
-cities = []
-with open('cities.txt', 'r', encoding='utf-8') as file:
-    for city in file:
-        cities.append(city.strip())
-cities = list(set(cities))
+from reference_info import regions, cities, FSIN_checker
 
 rosuznik_pages = [f'https://rosuznik.org/prisoner?page={page}' for page in range(1, 12)]
 rosuznik_links = []
@@ -40,12 +30,9 @@ for prisoner_link in rosuznik_links:
 
     other_info = prisoner_info.find_all('div', attrs={'class': 'col-lg-3'})
 
-    all_info = prisoner_soup.find_all('div', attrs={'class': 'accordion-body'})
-    description = []
-    if all_info:
-        for subtitle in all_info:
-            chapter = subtitle.get_text(strip=True)
-            description.append(chapter)
+    common_info = prisoner_soup.find('div', attrs={'class': 'accordion-body'})
+    if common_info:
+        description = common_info.get_text(strip=True)
 
     hometown = None
     date_of_birth = None
@@ -71,12 +58,13 @@ for prisoner_link in rosuznik_links:
     prison = None
     region = None
     street = None
+    ways = []
 
     for elem in address.split(', '):
         postcode_example = re.compile(r'\d{6}')
         building_example = re.compile(r'\d{1,3}\D?', re.IGNORECASE)
         prison_example = re.compile(r'СИЗО-?\d{1,3}|T-?\d{1,3}|ИК-\d{1,3}', re.IGNORECASE)
-        region_aliases = re.compile(r'респуб|обл|кра', re.IGNORECASE)
+        region_aliases = re.compile(r'по?\s?(\D*(?:ая|ой|ому)\s*(?:республик[ае]|област[ьи]|кра[йю]))', re.IGNORECASE)
         street_aliases = re.compile(r' ул|ул.?', re.IGNORECASE)
         if re.search(postcode_example, elem):
             postcode = elem
@@ -85,7 +73,11 @@ for prisoner_link in rosuznik_links:
         elif re.search(prison_example, elem):
             prison = re.search(prison_example, elem).group(0)
             if re.search(region_aliases, elem) or elem in regions:
-                region = elem
+                region = (re.search(region_aliases, elem).group(1))
+                region = region.replace('республике', 'республика')
+                region = region.replace('края', 'край')
+                region = region.replace('области', 'область')
+                region = region.replace('ой', 'ая')
         elif re.search(building_example, elem):
             building = re.search(building_example, elem).group()
         elif re.search(region_aliases, elem) or elem in regions:
@@ -93,8 +85,11 @@ for prisoner_link in rosuznik_links:
         elif re.search(street_aliases, elem):
             street = elem
 
+    if FSIN_checker(region, prison):
+        ways.append('ФСИН-письмо')
+
     prisoner = Prisoner(link=prisoner_link, source='Росузник', name=name, surname=surname, patronymic=patronymic,
-                        date_of_birth=date_of_birth, description=description, article=article, hometown=hometown,
-                        address=address, postcode=postcode, region=region, city=city, prison=prison, street=street,
-                        building=building, photo=photo_link, sex=None, ways=['Росузник'], frequency=None)
+                        date_of_birth=date_of_birth, description=description, article=article, category=None,
+                        hometown=hometown, address=address, postcode=postcode, region=region, city=city, prison=prison,
+                        street=street, building=building, photo=photo_link, sex=None, ways=['Росузник'], frequency=None)
     mongo_file.collection.insert_one(prisoner.__dict__)

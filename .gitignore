@@ -130,3 +130,7 @@ dmypy.json
 
 #PyCharm project files
 /.idea/
+
+#Working directories
+common_list.txt
+religious_list.txt
